@@ -22,6 +22,10 @@ import QRCode from "qrcode";
 const SUPABASE_URL = ""; // e.g. https://xxxxxxxxxxxx.supabase.co
 const SUPABASE_ANON_KEY = ""; // e.g. eyJhbGciOi...
 
+// local auth keys
+const PASSCODE_KEY = "loopcard_passcode_v1";
+const AUTH_FLAG_KEY = "loopcard_authed_v1";
+
 // ---- Light-weight store using localStorage --------------------------------
 const defaultState = {
   businessName: "",
@@ -126,15 +130,32 @@ export default function App() {
   const [route, setRoute] = useState("wizard"); // wizard | dashboard | public | settings
   const [s, setS] = useFormState();
 
+  // auth state (local-only)
+  const [authed, setAuthed] = useState(() => localStorage.getItem(AUTH_FLAG_KEY) === "1");
+
   useEffect(() => {
     // start at dashboard if already filled
     const allOk = required.every((k) => !!s[k]);
     if (allOk && route === "wizard") setRoute("dashboard");
   }, []); // mount only
 
+  const handleAuth = () => {
+    localStorage.setItem(AUTH_FLAG_KEY, "1");
+    setAuthed(true);
+  };
+  const handleLogout = () => {
+    localStorage.setItem(AUTH_FLAG_KEY, "0");
+    setAuthed(false);
+    setRoute("wizard");
+  };
+
+  if (!authed) {
+    return <Login onAuth={handleAuth} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <Header onNav={setRoute} route={route} colorHex={s.colorHex} />
+      <Header onNav={setRoute} route={route} colorHex={s.colorHex} onLogout={handleLogout} />
       <main className="mx-auto max-w-4xl p-4 sm:p-6">
         {route === "wizard" && <Wizard s={s} setS={setS} onDone={() => setRoute("dashboard")} />}
         {route === "dashboard" && <Dashboard s={s} onPreview={() => setRoute("public")} onSettings={() => setRoute("settings")} />}
@@ -146,7 +167,7 @@ export default function App() {
   );
 }
 
-function Header({ onNav, route, colorHex }) {
+function Header({ onNav, route, colorHex, onLogout }) {
   return (
     <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex max-w-4xl items-center justify-between p-3">
@@ -158,9 +179,85 @@ function Header({ onNav, route, colorHex }) {
           <Button variant={route === "dashboard" ? "primary" : "outline"} onClick={() => onNav("dashboard")}>Dashboard</Button>
           <Button variant={route === "public" ? "primary" : "outline"} onClick={() => onNav("public")}>Public Card</Button>
           <Button variant={route === "settings" ? "primary" : "outline"} onClick={() => onNav("settings")}>Settings</Button>
+          <Button variant="ghost" onClick={onLogout}>Logout</Button>
         </nav>
       </div>
     </header>
+  );
+}
+
+// Login screen (local passcode; created on first run)
+function Login({ onAuth }) {
+  const existingPass = localStorage.getItem(PASSCODE_KEY) || "";
+  const [mode, setMode] = useState(existingPass ? "login" : "create"); // login | create
+  const [pass, setPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => setError(""), [pass, confirmPass, mode]);
+
+  const doCreate = () => {
+    if (!pass) {
+      setError("Enter a passcode");
+      return;
+    }
+    if (pass !== confirmPass) {
+      setError("Passcodes do not match");
+      return;
+    }
+    localStorage.setItem(PASSCODE_KEY, pass);
+    localStorage.setItem(AUTH_FLAG_KEY, "1");
+    onAuth();
+  };
+
+  const doLogin = () => {
+    const stored = localStorage.getItem(PASSCODE_KEY) || "";
+    if (!stored) {
+      setMode("create");
+      return;
+    }
+    if (pass === stored) {
+      localStorage.setItem(AUTH_FLAG_KEY, "1");
+      onAuth();
+    } else {
+      setError("Incorrect passcode");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow">
+        <h2 className="mb-2 text-xl font-bold">{mode === "create" ? "Create Passcode" : "Sign in"}</h2>
+        <p className="mb-4 text-sm text-slate-600">This passcode is stored locally only.</p>
+
+        <div className="mb-3">
+          <label className="text-sm font-medium text-slate-700">Passcode</label>
+          <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+        </div>
+
+        {mode === "create" && (
+          <div className="mb-3">
+            <label className="text-sm font-medium text-slate-700">Confirm Passcode</label>
+            <input type="password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+        )}
+
+        {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
+
+        <div className="flex gap-2">
+          {mode === "create" ? (
+            <Button onClick={doCreate}>Create & Continue</Button>
+          ) : (
+            <Button onClick={doLogin}>Sign In</Button>
+          )}
+          {mode === "login" ? (
+            <Button variant="ghost" onClick={() => setMode("create")}>Create Passcode</Button>
+          ) : (
+            <Button variant="ghost" onClick={() => { setMode("login"); setPass(""); setConfirmPass(""); }}>Have an account? Sign in</Button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
